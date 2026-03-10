@@ -1,3 +1,6 @@
+# IDE
+.idea/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -12,3 +15,6 @@ rapidast/
 # Generated
 Cr-Configs/
 Dastscan-op/
+
+# GCS / Google Cloud Storage credentials (never commit)
+rapidast-sa-*.json

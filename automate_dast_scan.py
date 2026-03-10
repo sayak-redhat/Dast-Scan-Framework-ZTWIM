@@ -40,8 +40,22 @@ CR_CONFIGS = [
 RAPIDAST_REPO = "https://github.com/RedHatProductSecurity/rapidast.git"
 RAPIDAST_DIR = "rapidast"
 CONFIG_DIR = "Cr-Configs"
+CONFIG_FILE = "config/config.yaml"
 RESULT_BASE_DIR = "Dastscan-op"
 OOBTKUBE_SCRIPT = "scanners/generic/tools/oobtkube.py"
+
+
+def load_config(script_dir):
+    """Load config/config.yaml if it exists. Return dict or empty dict."""
+    config_path = script_dir / CONFIG_FILE
+    if not config_path.exists():
+        return {}
+    try:
+        with open(config_path) as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        print(f"  [WARN] Could not load {CONFIG_FILE}: {e}")
+        return {}
 
 
 def run_cmd(cmd, check=True, capture=True):
@@ -406,6 +420,32 @@ def main():
         config_dir, result_dir, rapidast_path
     )
     print_summary(result_dir)
+
+    # Export to GCS if configured in config/config.yaml
+    config = load_config(script_dir)
+    gcs_config = config.get("config", {}).get("googleCloudStorage", {})
+    bucket_name = gcs_config.get("bucketName")
+    if bucket_name:
+        try:
+            from exports.gcs_export import GoogleCloudStorage
+
+            app_name = (
+                config.get("application", {}).get("shortName")
+                or config.get("application", {}).get("ProductName")
+                or "ZTWIM-DAST"
+            )
+            gcs = GoogleCloudStorage(
+                bucket_name=bucket_name,
+                app_name=app_name,
+                directory=gcs_config.get("directory"),
+                keyfile=gcs_config.get("keyFile"),
+            )
+            gcs.export_scan(str(result_dir))
+        except ImportError as e:
+            print(f"  [FAIL] GCS export requires google-cloud-storage: pip install -r requirements.txt")
+            print(f"         {e}")
+        except Exception as e:
+            print(f"  [FAIL] GCS export failed: {e}")
 
     print("Done.")
     print(f"Results saved to: {result_dir}")

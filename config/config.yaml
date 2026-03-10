@@ -1,0 +1,13 @@
+# DAST Scan Automation - Configuration
+# GCS export: when config.googleCloudStorage.bucketName is set, scan results are
+# uploaded to the bucket in RapiDAST format:
+#   gs://{bucket}/{directory}/{timestamp}-RapiDAST-{app_name}-{random}.tgz
+
+config:
+  googleCloudStorage:
+    keyFile: "rapidast-sa-operators-ztwim_key.json"
+    bucketName: "secaut-bucket"
+    directory: "operators/ztwim"
+
+application:
+  shortName: "ZTWIM-DAST"
