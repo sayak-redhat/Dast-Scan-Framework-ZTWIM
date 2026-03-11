@@ -1,0 +1,38 @@
+# DAST Scan Automation - ZTWIM Operator Configuration
+# Usage: python3 automate_dast_scan.py --config config/ztwim.yaml
+
+# Framework settings (paths, tooling)
+framework:
+  rapidastRepo: "https://github.com/RedHatProductSecurity/rapidast.git"
+  rapidastDir: "rapidast"
+  configDir: "Cr-Configs"
+  resultBaseDir: "Dastscan-op"
+  oobtkubeScript: "scanners/generic/tools/oobtkube.py"
+
+# Operator settings (required per scan)
+operator: ztwim
+namespace: zero-trust-workload-identity-manager
+cr_configs:
+  - plural: zerotrustworkloadidentitymanagers
+    name: cluster
+  - plural: spireservers
+    name: cluster
+  - plural: spireagents
+    name: cluster
+  - plural: spiffecsidrivers
+    name: cluster
+  - plural: spireoidcdiscoveryproviders
+    name: cluster
+
+# Application metadata (for GCS export, etc.)
+application:
+  shortName: "ZTWIM-DAST"
+
+# GCS export (optional)
+# When config.googleCloudStorage.bucketName is set, scan results are uploaded:
+#   gs://{bucket}/{directory}/{timestamp}-RapiDAST-{app_name}-{random}.tgz
+config:
+  googleCloudStorage:
+    keyFile: "rapidast-sa-operators-ztwim_key.json"
+    bucketName: "secaut-bucket"
+    directory: "operators/ztwim"

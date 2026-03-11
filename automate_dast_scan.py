@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
-Automated DAST Scanning for Zero Trust Workload Identity Manager (ZTWIM) Operator
+DAST scan automation for OpenShift operators.
+
+Generic, config-driven framework. All operator-specific settings (namespace, CRs)
+and tooling paths are defined in a YAML config file. Use --config to specify
+which operator config to use.
 
 Prerequisites:
   - OpenShift cluster with oc CLI configured
-  - ZTWIM operator and operands installed in zero-trust-workload-identity-manager namespace
+  - Operator installed in the configured namespace
   - Python 3.x with PyYAML
 
 Usage:
-  python3 automate_dast_scan.py [--callback-ip IP] [--download-rapidast] [--namespace NAMESPACE]
-
-Example:
-  python3 automate_dast_scan.py --callback-ip 10.215.98.167
-  python3 automate_dast_scan.py --download-rapidast
+  python3 automate_dast_scan.py --config config/ztwim.yaml
+  python3 automate_dast_scan.py --config config/ztwim.yaml --callback-ip 10.0.0.1
 """
 
 import argparse
@@ -28,34 +29,49 @@ except ImportError:
     print("Error: PyYAML required. Install with: pip install -r requirements.txt")
     sys.exit(1)
 
-# CRDs to scan: (plural_name, cr_name)
-CR_CONFIGS = [
-    ("zerotrustworkloadidentitymanagers", "cluster"),
-    ("spireservers", "cluster"),
-    ("spireagents", "cluster"),
-    ("spiffecsidrivers", "cluster"),
-    ("spireoidcdiscoveryproviders", "cluster"),
-]
-
-RAPIDAST_REPO = "https://github.com/RedHatProductSecurity/rapidast.git"
-RAPIDAST_DIR = "rapidast"
-CONFIG_DIR = "Cr-Configs"
-CONFIG_FILE = "config/config.yaml"
-RESULT_BASE_DIR = "Dastscan-op"
-OOBTKUBE_SCRIPT = "scanners/generic/tools/oobtkube.py"
+DEFAULT_CONFIG = "config/ztwim.yaml"
 
 
-def load_config(script_dir):
-    """Load config/config.yaml if it exists. Return dict or empty dict."""
-    config_path = script_dir / CONFIG_FILE
+def load_config(config_path):
+    """Load YAML config from path. Return dict or empty dict."""
+    config_path = Path(config_path)
     if not config_path.exists():
         return {}
     try:
         with open(config_path) as f:
             return yaml.safe_load(f) or {}
     except Exception as e:
-        print(f"  [WARN] Could not load {CONFIG_FILE}: {e}")
+        print(f"  [WARN] Could not load {config_path}: {e}")
         return {}
+
+
+def get_framework(config):
+    """Extract framework settings with defaults."""
+    fw = config.get("framework") or {}
+    return {
+        "rapidastRepo": fw.get("rapidastRepo", "https://github.com/RedHatProductSecurity/rapidast.git"),
+        "rapidastDir": fw.get("rapidastDir", "rapidast"),
+        "configDir": fw.get("configDir", "Cr-Configs"),
+        "resultBaseDir": fw.get("resultBaseDir", "Dastscan-op"),
+        "oobtkubeScript": fw.get("oobtkubeScript", "scanners/generic/tools/oobtkube.py"),
+    }
+
+
+def get_cr_configs(config):
+    """Extract cr_configs from config as list of (plural, name) tuples."""
+    cr_list = config.get("cr_configs")
+    if not cr_list:
+        return []
+    result = []
+    for item in cr_list:
+        if isinstance(item, dict):
+            plural = item.get("plural") or item.get("resource")
+            name = item.get("name") or item.get("instance")
+            if plural and name:
+                result.append((plural, name))
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            result.append((str(item[0]), str(item[1])))
+    return result
 
 
 def run_cmd(cmd, check=True, capture=True):
@@ -78,10 +94,10 @@ def get_timestamp_dir():
     return datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 
-def ensure_rapidast(script_dir, download=False):
+def ensure_rapidast(script_dir, framework, download=False):
     """Ensure rapidast exists. Clone from GitHub only if not present. Never re-download."""
-    rapidast_path = script_dir / RAPIDAST_DIR
-    oobtkube_path = rapidast_path / OOBTKUBE_SCRIPT
+    rapidast_path = script_dir / framework["rapidastDir"]
+    oobtkube_path = rapidast_path / framework["oobtkubeScript"]
 
     if oobtkube_path.exists():
         print(f"  [OK] RapiDAST found at {rapidast_path} (skipping download)")
@@ -97,9 +113,10 @@ def ensure_rapidast(script_dir, download=False):
         print(f"  Run with --download-rapidast to clone from GitHub")
         sys.exit(1)
 
-    print(f"  Cloning RapiDAST from {RAPIDAST_REPO}...")
+    repo = framework["rapidastRepo"]
+    print(f"  Cloning RapiDAST from {repo}...")
     result = subprocess.run(
-        f"git clone {RAPIDAST_REPO} {rapidast_path}",
+        f"git clone {repo} {rapidast_path}",
         shell=True,
         cwd=script_dir,
         capture_output=True,
@@ -156,7 +173,6 @@ def check_prerequisites(namespace):
     print("Step 1: Checking prerequisites...")
     print("=" * 60)
 
-    # Check oc is available
     try:
         run_cmd("oc version", check=True)
         print("  [OK] oc CLI available")
@@ -164,7 +180,6 @@ def check_prerequisites(namespace):
         print("  [FAIL] oc CLI not found or not configured")
         sys.exit(1)
 
-    # Check cluster access
     try:
         run_cmd("oc whoami", check=True)
         print("  [OK] Cluster access verified")
@@ -172,7 +187,6 @@ def check_prerequisites(namespace):
         print("  [FAIL] Cannot access cluster. Check KUBECONFIG.")
         sys.exit(1)
 
-    # Check namespace exists
     try:
         result = subprocess.run(
             f"oc get namespace {namespace} -o name",
@@ -188,7 +202,6 @@ def check_prerequisites(namespace):
         print(f"  [FAIL] Namespace {namespace} not found")
         sys.exit(1)
 
-    # Check pods are running
     try:
         out = run_cmd(f"oc get pods -n {namespace} --no-headers 2>/dev/null")
         pods = [line for line in out.split("\n") if line and "Running" in line]
@@ -202,15 +215,16 @@ def check_prerequisites(namespace):
     print()
 
 
-def export_crs(namespace, config_dir):
+def export_crs(namespace, config_dir, cr_configs):
     """Export all CRs from cluster."""
     print("=" * 60)
     print("Step 2: Exporting CRs from cluster...")
     print("=" * 60)
 
+    config_dir = Path(config_dir)
     config_dir.mkdir(parents=True, exist_ok=True)
 
-    for plural, cr_name in CR_CONFIGS:
+    for plural, cr_name in cr_configs:
         try:
             result = subprocess.run(
                 f"oc get {plural} {cr_name} -n {namespace} -o yaml",
@@ -268,17 +282,17 @@ def get_callback_ip():
     return None
 
 
-def run_oobtkube_scans(callback_ip, duration, port, config_dir, result_dir, rapidast_path):
+def run_oobtkube_scans(callback_ip, duration, port, config_dir, result_dir, rapidast_path, oobtkube_script):
     """Run OOBTKUBE for each CR config."""
     print("=" * 60)
     print("Step 3: Running OOBTKUBE scans...")
     print("=" * 60)
 
-    oobtkube_script = rapidast_path / OOBTKUBE_SCRIPT
+    oobtkube_path = rapidast_path / oobtkube_script
     config_files = list(config_dir.glob("*.yaml"))
 
     if not config_files:
-        print("  [FAIL] No YAML files found in Cr-Configs/")
+        print(f"  [FAIL] No YAML files found in {config_dir}")
         sys.exit(1)
 
     for config_file in sorted(config_files):
@@ -289,7 +303,7 @@ def run_oobtkube_scans(callback_ip, duration, port, config_dir, result_dir, rapi
 
         cmd = [
             sys.executable,
-            str(oobtkube_script),
+            str(oobtkube_path),
             "-d", str(duration),
             "-p", str(port),
             "-i", callback_ip,
@@ -341,12 +355,18 @@ def print_summary(result_dir):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Automate DAST scanning for ZTWIM operator on OpenShift"
+        description="DAST scan automation for OpenShift operators (config-driven)"
+    )
+    parser.add_argument(
+        "--config",
+        "-c",
+        default=DEFAULT_CONFIG,
+        help=f"Path to operator config YAML (default: {DEFAULT_CONFIG})",
     )
     parser.add_argument(
         "--namespace",
-        default="zero-trust-workload-identity-manager",
-        help="Operator namespace",
+        default=None,
+        help="Operator namespace (overrides config file)",
     )
     parser.add_argument(
         "--callback-ip",
@@ -381,11 +401,31 @@ def main():
     script_dir = Path(__file__).parent.resolve()
     os.chdir(script_dir)
 
-    # Ensure RapiDAST exists (clone if --download-rapidast or already exists)
+    # Load config
+    config_path = script_dir / args.config
+    config = load_config(config_path)
+    if not config:
+        print(f"Error: Config file not found or empty: {config_path}")
+        print(f"  Use --config to specify a valid config file.")
+        sys.exit(1)
+
+    framework = get_framework(config)
+    cr_configs = get_cr_configs(config)
+    namespace = args.namespace or config.get("namespace")
+
+    # Validate required config
+    if not namespace:
+        print("Error: namespace is required. Set it in config file or use --namespace.")
+        sys.exit(1)
+    if not cr_configs and not args.skip_export:
+        print("Error: cr_configs is required in config file (or use --skip-export with existing Cr-Configs/).")
+        sys.exit(1)
+
+    # Ensure RapiDAST exists
     print("=" * 60)
     print("Step 0: Ensuring RapiDAST is available...")
     print("=" * 60)
-    rapidast_path = ensure_rapidast(script_dir, download=args.download_rapidast)
+    rapidast_path = ensure_rapidast(script_dir, framework, download=args.download_rapidast)
     print()
 
     callback_ip = args.callback_ip or get_callback_ip()
@@ -395,34 +435,34 @@ def main():
 
     # Create timestamped result directory
     timestamp = get_timestamp_dir()
-    result_dir = script_dir / RESULT_BASE_DIR / timestamp
+    operator_name = config.get("operator", "default")
+    result_dir = script_dir / framework["resultBaseDir"] / operator_name / timestamp
     result_dir.mkdir(parents=True, exist_ok=True)
-    config_dir = script_dir / CONFIG_DIR
+    config_dir = script_dir / framework["configDir"]
 
+    print(f"Config: {config_path}")
     print(f"Using callback IP: {callback_ip}")
     print(f"Result directory: {result_dir}")
     print(f"Ensure firewall allows port {args.port}: sudo firewall-cmd --add-port={args.port}/tcp")
     print()
 
-    check_prerequisites(args.namespace)
+    check_prerequisites(namespace)
 
-    # Precheck: restore CRs from previous run so cluster is clean before scan
-    restore_crs(args.namespace, config_dir)
+    restore_crs(namespace, config_dir)
 
     if not args.skip_export:
-        export_crs(args.namespace, config_dir)
+        export_crs(namespace, config_dir, cr_configs)
     else:
         print("Skipping CR export (--skip-export). Using existing Cr-Configs/")
         config_dir.mkdir(parents=True, exist_ok=True)
 
     run_oobtkube_scans(
         callback_ip, args.duration, args.port,
-        config_dir, result_dir, rapidast_path
+        config_dir, result_dir, rapidast_path, framework["oobtkubeScript"]
     )
     print_summary(result_dir)
 
-    # Export to GCS if configured in config/config.yaml
-    config = load_config(script_dir)
+    # Export to GCS if configured
     gcs_config = config.get("config", {}).get("googleCloudStorage", {})
     bucket_name = gcs_config.get("bucketName")
     if bucket_name:
@@ -432,15 +472,17 @@ def main():
             app_name = (
                 config.get("application", {}).get("shortName")
                 or config.get("application", {}).get("ProductName")
-                or "ZTWIM-DAST"
             )
-            gcs = GoogleCloudStorage(
-                bucket_name=bucket_name,
-                app_name=app_name,
-                directory=gcs_config.get("directory"),
-                keyfile=gcs_config.get("keyFile"),
-            )
-            gcs.export_scan(str(result_dir))
+            if not app_name:
+                print("  [WARN] application.shortName not set; skipping GCS export")
+            else:
+                gcs = GoogleCloudStorage(
+                    bucket_name=bucket_name,
+                    app_name=app_name,
+                    directory=gcs_config.get("directory"),
+                    keyfile=gcs_config.get("keyFile"),
+                )
+                gcs.export_scan(str(result_dir))
         except ImportError as e:
             print(f"  [FAIL] GCS export requires google-cloud-storage: pip install -r requirements.txt")
             print(f"         {e}")

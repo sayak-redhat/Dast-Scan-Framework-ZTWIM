@@ -1,6 +1,6 @@
-# DAST Scan Automation for ZTWIM Operator
+# DAST Scan Automation for OpenShift Operators
 
-Automated DAST (Dynamic Application Security Testing) scanning for the Zero Trust Workload Identity Manager operator on OpenShift using RapiDAST OOBTKUBE.
+Generic, config-driven framework for DAST (Dynamic Application Security Testing) scanning of OpenShift operators using RapiDAST OOBTKUBE. Works with any operator—ZTWIM, Service Mesh, or custom operators—by providing an operator-specific config file.
 
 ---
 
@@ -9,8 +9,8 @@ Automated DAST (Dynamic Application Security Testing) scanning for the Zero Trus
 ### 1. OpenShift Cluster
 
 - OpenShift cluster with `oc` CLI configured
-- **ZTWIM operator and operands installed** in `zero-trust-workload-identity-manager` namespace
-- Verify with: `oc get pods -n zero-trust-workload-identity-manager`
+- **Operator installed** in a namespace (e.g. `zero-trust-workload-identity-manager` for ZTWIM)
+- Verify with: `oc get pods -n <your-namespace>`
 
 ### 2. RapiDAST
 
@@ -50,7 +50,7 @@ export KUBECONFIG=/path/to/your/kubeconfig
 
 ## Usage
 
-### Basic Run (auto-detect callback IP, requires rapidast cloned)
+### Basic Run (default config: ZTWIM)
 
 ```bash
 cd dast-scan-automation
@@ -65,6 +65,12 @@ pip install -r requirements.txt
 python3 automate_dast_scan.py --download-rapidast
 ```
 
+### Specify Config File
+
+```bash
+python3 automate_dast_scan.py --config config/ztwim.yaml
+```
+
 ### Specify Callback IP
 
 ```bash
@@ -75,6 +81,7 @@ python3 automate_dast_scan.py --callback-ip 10.215.98.167
 
 ```bash
 python3 automate_dast_scan.py \
+  --config config/ztwim.yaml \
   --callback-ip 10.215.98.167 \
   --download-rapidast \
   --namespace zero-trust-workload-identity-manager \
@@ -84,11 +91,93 @@ python3 automate_dast_scan.py \
 
 ---
 
+## Using for Other Operators
+
+The framework is generic. To scan a **different operator**, create a config file and run with `--config`.
+
+### Step 1: Find Your Operator's CRs
+
+List Custom Resources in your operator's namespace:
+
+```bash
+# List all API resources (find the plural name)
+oc api-resources | grep -i <your-operator>
+
+# List CR instances in your namespace
+oc get <plural> -n <namespace>
+```
+
+Example for a hypothetical "MyOperator":
+```bash
+oc api-resources | grep -i myoperator
+# myoperatorconfigs   moc   v1   MyOperatorConfig
+
+oc get myoperatorconfigs -n openshift-myoperator
+# NAME      AGE
+# cluster   5d
+```
+
+### Step 2: Create a Config File
+
+Copy the example template and customize:
+
+```bash
+cp config/example-operator.yaml config/my-operator.yaml
+```
+
+Edit `config/my-operator.yaml`:
+
+```yaml
+operator: my-operator
+namespace: openshift-myoperator
+cr_configs:
+  - resource: myoperatorconfigs    # Kubernetes resource type (oc get <resource>)
+    instance: cluster              # Name of this CR instance
+  # Add more CRs as needed:
+  # - resource: myoperatorinstances
+  #   instance: default
+
+application:
+  shortName: "MY-OPERATOR-DAST"
+
+# Optional: GCS export
+config:
+  googleCloudStorage:
+    keyFile: ""
+    bucketName: ""
+    directory: ""
+```
+
+**Config keys:** Use `resource`/`instance` (recommended) or `plural`/`name`—both work.
+
+### Step 3: Run the Scan
+
+```bash
+python3 automate_dast_scan.py --config config/my-operator.yaml
+```
+
+### Step 4: View Results
+
+Results are stored per operator:
+
+```
+Dastscan-op/
+├── ztwim/                          # ZTWIM operator runs
+│   └── 2026-03-02_10-30-00/
+│       └── oobtkube-*-results.sarif
+└── my-operator/                    # Your operator runs
+    └── 2026-03-02_11-00-00/
+        └── oobtkube-*-results.sarif
+```
+
+---
+
 ## Arguments
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--namespace` | zero-trust-workload-identity-manager | Operator namespace |
+| `--config`, `-c` | config/ztwim.yaml | Path to operator config YAML |
+| `--namespace` | from config | Operator namespace (overrides config) |
 | `--callback-ip` | auto-detect | IP reachable from cluster pods |
 | `--duration` | 120 | Scan duration per CR (seconds) |
 | `--port` | 12345 | Callback listener port |
@@ -97,43 +186,74 @@ python3 automate_dast_scan.py \
 
 ---
 
+## Config File Structure
+
+```yaml
+# Framework (optional; defaults are used if omitted)
+framework:
+  rapidastRepo: "https://github.com/RedHatProductSecurity/rapidast.git"
+  rapidastDir: "rapidast"
+  configDir: "Cr-Configs"
+  resultBaseDir: "Dastscan-op"
+  oobtkubeScript: "scanners/generic/tools/oobtkube.py"
+
+# Operator (required)
+operator: ztwim
+namespace: zero-trust-workload-identity-manager
+cr_configs:
+  - resource: zerotrustworkloadidentitymanagers
+    instance: cluster
+  # or: plural / name (both supported)
+
+# Application metadata (for GCS export)
+application:
+  shortName: "ZTWIM-DAST"
+
+# GCS export (optional)
+config:
+  googleCloudStorage:
+    keyFile: "rapidast-sa-operators-ztwim_key.json"
+    bucketName: "secaut-bucket"
+    directory: "operators/ztwim"
+```
+
+---
+
 ## Output Structure
 
-Each run creates a **timestamped directory** under `Dastscan-op/`:
+Each run creates a **timestamped directory** under `Dastscan-op/<operator>/`:
 
 ```
 dast-scan-automation/
 ├── automate_dast_scan.py
-├── requirements.txt
-├── README.md
-├── rapidast/                    # Cloned by --download-rapidast
-├── Cr-Configs/                  # Exported CR YAML files
+├── config/
+│   ├── ztwim.yaml            # ZTWIM operator
+│   └── example-operator.yaml # Template for new operators
+├── rapidast/                 # Cloned by --download-rapidast
+├── Cr-Configs/               # Exported CR YAML files
 │   ├── zerotrustworkloadidentitymanagers-cr-oobtkube.yaml
-│   ├── spireservers-cr-oobtkube.yaml
-│   ├── spireagents-cr-oobtkube.yaml
-│   ├── spiffecsidrivers-cr-oobtkube.yaml
-│   └── spireoidcdiscoveryproviders-cr-oobtkube.yaml
+│   └── ...
 └── Dastscan-op/
-    ├── 2026-02-26_14-30-00/     # Timestamped run
-    │   ├── oobtkube-zerotrustworkloadidentitymanagers-cr-oobtkube-results.sarif
-    │   ├── oobtkube-spireservers-cr-oobtkube-results.sarif
-    │   ├── oobtkube-spireagents-cr-oobtkube-results.sarif
-    │   ├── oobtkube-spiffecsidrivers-cr-oobtkube-results.sarif
-    │   └── oobtkube-spireoidcdiscoveryproviders-cr-oobtkube-results.sarif
-    └── 2026-02-26_16-45-00/     # Another run
-        └── ...
+    ├── ztwim/
+    │   └── 2026-03-02_10-30-00/
+    │       └── oobtkube-*-results.sarif
+    └── my-operator/
+        └── 2026-03-02_11-00-00/
+            └── oobtkube-*-results.sarif
 ```
 
 ---
 
 ## What the Script Does
 
-1. **Ensures RapiDAST** — Clones from GitHub only if not present (never re-downloads if repo exists)
-2. **Checks prerequisites** — oc CLI, cluster access, namespace, pods
-3. **Precheck: Restore CRs** — Restores CRs from Cr-Configs/ (from previous run) so cluster starts clean
-4. **Exports CRs** — Exports all 5 CRs (operator + operands) to Cr-Configs/
-5. **Runs OOBTKUBE** — Scans each CR for command injection
-6. **Stores results** — Saves SARIF files in `Dastscan-op/YYYY-MM-DD_HH-MM-SS/`
+1. **Loads config** — Reads operator settings (namespace, CRs) from YAML
+2. **Ensures RapiDAST** — Clones from GitHub only if not present
+3. **Checks prerequisites** — oc CLI, cluster access, namespace, pods
+4. **Restore CRs** — Restores CRs from Cr-Configs/ so cluster starts clean
+5. **Exports CRs** — Exports configured CRs to Cr-Configs/
+6. **Runs OOBTKUBE** — Scans each CR for command injection
+7. **Stores results** — Saves SARIF files in `Dastscan-op/<operator>/<timestamp>/`
+8. **GCS export** — Optionally uploads results if configured
 
 ---
 
@@ -141,10 +261,10 @@ dast-scan-automation/
 
 ```bash
 # View a specific run
-cat Dastscan-op/2026-02-26_14-30-00/oobtkube-*-results.sarif | jq .
+cat Dastscan-op/ztwim/2026-03-02_10-30-00/oobtkube-*-results.sarif | jq .
 
-# List all runs
-ls -la Dastscan-op/
+# List all runs for an operator
+ls -la Dastscan-op/ztwim/
 ```
 
 ---
@@ -153,10 +273,12 @@ ls -la Dastscan-op/
 
 | Issue | Solution |
 |-------|----------|
+| Config file not found | Use `--config` with correct path; default is `config/ztwim.yaml` |
+| namespace/cr_configs required | Ensure config file has `namespace` and `cr_configs` |
 | RapiDAST not found | Run with `--download-rapidast` |
 | Callback IP not detected | Use `--callback-ip YOUR_IP` |
 | No callback received | Verify firewall allows port; ensure cluster can reach your IP |
-| Namespace not found | Check operator is installed; use `--namespace` if different |
+| Namespace not found | Check operator is installed; set `namespace` in config or `--namespace` |
 | PyYAML missing | `pip install -r requirements.txt` |
 
 ---
@@ -165,13 +287,16 @@ ls -la Dastscan-op/
 
 The script can be **rerun repeatedly** without manual cleanup:
 
-- **Restore precheck** — Before each run, CRs are restored from Cr-Configs/ (from the previous run), so the cluster starts clean
+- **Restore precheck** — Before each run, CRs are restored from Cr-Configs/
 - **RapiDAST** — Never re-cloned if already present
 - **Results** — Each run creates a new timestamped directory; previous results are kept
 
 ---
 
-## CRs Scanned
+## Example: ZTWIM Operator (Default Config)
+
+The default `config/ztwim.yaml` is configured for ZTWIM:
 
 - **Operator:** ZeroTrustWorkloadIdentityManager
 - **Operands:** SpireServer, SpireAgent, SpiffeCSIDriver, SpireOIDCDiscoveryProvider
+- **Namespace:** zero-trust-workload-identity-manager
