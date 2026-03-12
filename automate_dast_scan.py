@@ -18,6 +18,7 @@ Usage:
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -134,6 +135,30 @@ def ensure_rapidast(script_dir, framework, download=False):
     return rapidast_path
 
 
+def migrate_flat_config_to_operator_dir(config_dir, cr_configs):
+    """
+    One-time migration: move CR files from flat Cr-Configs/ to Cr-Configs/<operator>/.
+    When operator-specific dir is empty and flat dir has matching files, migrate them.
+    """
+    config_dir = Path(config_dir)
+    base_dir = config_dir.parent
+    expected = {f"{plural}-cr-oobtkube.yaml" for plural, _ in cr_configs} if cr_configs else set()
+    if not expected:
+        return
+
+    # Operator dir empty or missing, flat dir has matching files
+    op_files = list(config_dir.glob("*-cr-oobtkube.yaml")) if config_dir.exists() else []
+    flat_files = list(base_dir.glob("*-cr-oobtkube.yaml"))
+    to_migrate = [f for f in flat_files if f.name in expected and f.parent == base_dir]
+
+    if not op_files and to_migrate:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        for f in to_migrate:
+            dest = config_dir / f.name
+            shutil.move(str(f), str(dest))
+            print(f"  [MIGRATE] Moved {f.name} -> {config_dir.name}/")
+
+
 def restore_crs(namespace, config_dir):
     """Restore CRs to clean state from Cr-Configs (from previous run). Ensures clean baseline before scan."""
     config_dir = Path(config_dir)
@@ -233,7 +258,8 @@ def export_crs(namespace, config_dir, cr_configs):
                 text=True,
             )
             out = result.stdout or ""
-            if result.returncode != 0 or not out or "Error" in out:
+            # Skip on failure or oc error messages (not status values like "SecretSyncedError")
+            if result.returncode != 0 or not out or "Error from server" in out or "NotFound" in out:
                 print(f"  [SKIP] {plural}/{cr_name} not found")
                 continue
 
@@ -289,10 +315,10 @@ def run_oobtkube_scans(callback_ip, duration, port, config_dir, result_dir, rapi
     print("=" * 60)
 
     oobtkube_path = rapidast_path / oobtkube_script
-    config_files = list(config_dir.glob("*.yaml"))
+    config_files = sorted(config_dir.glob("*-cr-oobtkube.yaml"))
 
     if not config_files:
-        print(f"  [FAIL] No YAML files found in {config_dir}")
+        print(f"  [FAIL] No CR config files (*-cr-oobtkube.yaml) found in {config_dir}")
         sys.exit(1)
 
     for config_file in sorted(config_files):
@@ -433,27 +459,31 @@ def main():
         print("Error: Could not determine callback IP. Use --callback-ip.")
         sys.exit(1)
 
-    # Create timestamped result directory
+    # Create timestamped result directory and per-operator config directory
     timestamp = get_timestamp_dir()
     operator_name = config.get("operator", "default")
     result_dir = script_dir / framework["resultBaseDir"] / operator_name / timestamp
     result_dir.mkdir(parents=True, exist_ok=True)
-    config_dir = script_dir / framework["configDir"]
+    config_dir = script_dir / framework["configDir"] / operator_name
 
     print(f"Config: {config_path}")
     print(f"Using callback IP: {callback_ip}")
     print(f"Result directory: {result_dir}")
+    print(f"CR config directory: {config_dir}")
     print(f"Ensure firewall allows port {args.port}: sudo firewall-cmd --add-port={args.port}/tcp")
     print()
 
     check_prerequisites(namespace)
+
+    # Migrate from flat Cr-Configs/ to Cr-Configs/<operator>/ if needed (one-time)
+    migrate_flat_config_to_operator_dir(config_dir, cr_configs)
 
     restore_crs(namespace, config_dir)
 
     if not args.skip_export:
         export_crs(namespace, config_dir, cr_configs)
     else:
-        print("Skipping CR export (--skip-export). Using existing Cr-Configs/")
+        print(f"Skipping CR export (--skip-export). Using existing {config_dir}/")
         config_dir.mkdir(parents=True, exist_ok=True)
 
     run_oobtkube_scans(

@@ -221,23 +221,30 @@ config:
 
 ## Output Structure
 
-Each run creates a **timestamped directory** under `Dastscan-op/<operator>/`:
+Each run creates a **timestamped directory** under `Dastscan-op/<operator>/`. CR configs are stored **per operator** in `Cr-Configs/<operator>/` so multiple operators can be scanned without mixing files:
 
 ```
 dast-scan-automation/
 ├── automate_dast_scan.py
 ├── config/
 │   ├── ztwim.yaml            # ZTWIM operator
-│   └── example-operator.yaml # Template for new operators
+│   ├── eso.yaml              # External Secrets Operator
+│   └── example-operator.yaml  # Template for new operators
 ├── rapidast/                 # Cloned by --download-rapidast
-├── Cr-Configs/               # Exported CR YAML files
-│   ├── zerotrustworkloadidentitymanagers-cr-oobtkube.yaml
-│   └── ...
+├── Cr-Configs/               # Per-operator CR YAML files
+│   ├── ztwim/
+│   │   ├── zerotrustworkloadidentitymanagers-cr-oobtkube.yaml
+│   │   └── ...
+│   ├── eso/
+│   │   ├── externalsecrets-cr-oobtkube.yaml
+│   │   └── secretstores-cr-oobtkube.yaml
+│   └── my-operator/
+│       └── ...
 └── Dastscan-op/
     ├── ztwim/
     │   └── 2026-03-02_10-30-00/
     │       └── oobtkube-*-results.sarif
-    └── my-operator/
+    └── eso/
         └── 2026-03-02_11-00-00/
             └── oobtkube-*-results.sarif
 ```
@@ -249,11 +256,12 @@ dast-scan-automation/
 1. **Loads config** — Reads operator settings (namespace, CRs) from YAML
 2. **Ensures RapiDAST** — Clones from GitHub only if not present
 3. **Checks prerequisites** — oc CLI, cluster access, namespace, pods
-4. **Restore CRs** — Restores CRs from Cr-Configs/ so cluster starts clean
-5. **Exports CRs** — Exports configured CRs to Cr-Configs/
-6. **Runs OOBTKUBE** — Scans each CR for command injection
-7. **Stores results** — Saves SARIF files in `Dastscan-op/<operator>/<timestamp>/`
-8. **GCS export** — Optionally uploads results if configured
+4. **Migrate (one-time)** — Moves CR files from flat `Cr-Configs/` to `Cr-Configs/<operator>/` if present
+5. **Restore CRs** — Restores CRs from `Cr-Configs/<operator>/` so cluster starts clean
+6. **Exports CRs** — Exports configured CRs to `Cr-Configs/<operator>/`
+7. **Runs OOBTKUBE** — Scans each CR in the operator's config dir for command injection
+8. **Stores results** — Saves SARIF files in `Dastscan-op/<operator>/<timestamp>/`
+9. **GCS export** — Optionally uploads results if configured
 
 ---
 
@@ -287,9 +295,10 @@ ls -la Dastscan-op/ztwim/
 
 The script can be **rerun repeatedly** without manual cleanup:
 
-- **Restore precheck** — Before each run, CRs are restored from Cr-Configs/
+- **Restore precheck** — Before each run, CRs are restored from `Cr-Configs/<operator>/`
 - **RapiDAST** — Never re-cloned if already present
 - **Results** — Each run creates a new timestamped directory; previous results are kept
+- **Multi-operator** — Each operator uses its own config dir; ZTWIM and ESO scans do not interfere
 
 ---
 
