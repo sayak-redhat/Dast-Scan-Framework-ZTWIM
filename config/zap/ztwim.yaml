@@ -1,0 +1,28 @@
+# ZAP scan orchestration for ZTWIM (scripts/automate_zap_scan.py)
+# Results stored in zap-op/<operator>/<timestamp>/ (like oobtkube-op)
+# Usage: python3 scripts/automate_zap_scan.py --config config/zap/ztwim.yaml
+
+operator: ztwim
+
+zap:
+  configs:
+    - config/zap/ztwim-operator.yaml
+    - config/zap/ztwim-operands.yaml
+  rapidastImage: "quay.io/redhatproductsecurity/rapidast:latest"
+  # Operator scan (61+ URLs, active scan) can take 60-90 min; operands ~5-30 min
+  timeoutMinutes: 90
+  # Maps config index to output filename in timestamp dir
+  outputNames:
+    - zap-operator-results.sarif
+    - zap-operands-results.sarif
+
+# Application metadata (for GCS export)
+application:
+  shortName: "ZTWIM-DAST"
+
+# GCS export (optional)
+config:
+  googleCloudStorage:
+    keyFile: "rapidast-sa-operators-ztwim_key.json"
+    bucketName: "secaut-bucket"
+    directory: "operators/ztwim"

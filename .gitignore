@@ -1,5 +1,8 @@
 # IDE
 .idea/
+.vscode/
+*.swp
+*.swo
 
 # Python
 __pycache__/
@@ -8,16 +11,34 @@ __pycache__/
 .eggs/
 venv/
 .venv/
+.pytest_cache/
+.mypy_cache/
 
-# RapiDAST (cloned by script)
+# RapiDAST (cloned by --download-rapidast)
 rapidast/
 
-# Generated
+# OOBTKUBE results (automate_dast_scan.py)
+oobtkube-op/
+
+# ZAP results (Podman RapiDAST)
+zap-op/
+
+# Exported CRs from cluster (Cr-Configs/<operator>/*.yaml)
 Cr-Configs/
-Dastscan-op/
 
-# GCS / Google Cloud Storage credentials (never commit)
+# GCS credentials (never commit)
 rapidast-sa-*.json
+*_key.json
+*.pem
+.env
+.env.*
 
-# Example config (do not commit)
-config/example-operator.yaml
+# Kubeconfig (may contain tokens)
+*.kubeconfig
+
+# Local / example configs (user-created, may contain secrets)
+config/oobtkube/example-operator.yaml
+
+# Debug / temp files
+run_all_err.txt
+*.err

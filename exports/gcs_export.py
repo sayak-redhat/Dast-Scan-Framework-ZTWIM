@@ -83,3 +83,37 @@ class GoogleCloudStorage:
         gcs_path = f"gs://{self.bucket.name}/{blob_name}"
         print(f"  [OK] Results exported to {gcs_path}")
         return gcs_path
+
+    def export_combined_scan(self, result_dirs, base_dir):
+        """
+        Upload multiple result directories as a single tarball to GCS.
+        Each directory is added with its path relative to base_dir preserved.
+
+        Args:
+            result_dirs: list of paths to directories (e.g. oobtkube-op/ztwim/ts,
+                         zap-op/ZTWIM-Operator-ZAP/DAST-xxx, zap-op/ZTWIM-Operands-ZAP/DAST-xxx)
+            base_dir: base path for computing relative arcnames (typically repo root)
+        """
+        base_dir = os.path.abspath(str(base_dir))
+        tar_stream = BytesIO()
+        with tarfile.open(fileobj=tar_stream, mode="w:gz") as tar:
+            for result_dir in result_dirs:
+                result_dir = os.path.abspath(str(result_dir))
+                if not os.path.isdir(result_dir):
+                    continue
+                arcname = os.path.relpath(result_dir, base_dir)
+                tar.add(name=result_dir, arcname=arcname)
+        tar_stream.seek(0)
+
+        unique_id = "{}-RapiDAST-{}-{}.tgz".format(
+            datetime.datetime.now(tz=datetime.timezone.utc).isoformat(),
+            _sanitize_filename(self.app_name),
+            "".join(random.choices(string.ascii_letters + string.ascii_uppercase + string.digits, k=6)),
+        )
+        blob_name = self.directory.rstrip("/") + "/" + unique_id
+        blob = self.bucket.blob(blob_name)
+        with blob.open(mode="wb") as dest:
+            dest.write(tar_stream.getbuffer())
+        gcs_path = f"gs://{self.bucket.name}/{blob_name}"
+        print(f"  [OK] Combined results exported to {gcs_path}")
+        return gcs_path

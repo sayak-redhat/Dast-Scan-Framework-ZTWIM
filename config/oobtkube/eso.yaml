@@ -1,12 +1,12 @@
 # DAST Scan Automation - External Secrets Operator Configuration
-# Usage: python3 automate_dast_scan.py --config config/eso.yaml
+# Usage: python3 scripts/automate_dast_scan.py --config config/oobtkube/eso.yaml
 
 # Framework settings (paths, tooling)
 framework:
   rapidastRepo: "https://github.com/RedHatProductSecurity/rapidast.git"
   rapidastDir: "rapidast"
   configDir: "Cr-Configs"
-  resultBaseDir: "Dastscan-op"
+  resultBaseDir: "oobtkube-op"
   oobtkubeScript: "scanners/generic/tools/oobtkube.py"
 
 # Operator settings (required per scan)

@@ -1,12 +1,11 @@
-# DAST Scan Automation - ZTWIM Operator Configuration
-# Usage: python3 automate_dast_scan.py --config config/ztwim.yaml
+# Usage: python3 scripts/automate_dast_scan.py --config config/oobtkube/ztwim.yaml
 
 # Framework settings (paths, tooling)
 framework:
   rapidastRepo: "https://github.com/RedHatProductSecurity/rapidast.git"
   rapidastDir: "rapidast"
   configDir: "Cr-Configs"
-  resultBaseDir: "Dastscan-op"
+  resultBaseDir: "oobtkube-op"
   oobtkubeScript: "scanners/generic/tools/oobtkube.py"
 
 # Operator settings (required per scan)
@@ -31,6 +30,7 @@ application:
 # GCS export (optional)
 # When config.googleCloudStorage.bucketName is set, scan results are uploaded:
 #   gs://{bucket}/{directory}/{timestamp}-RapiDAST-{app_name}-{random}.tgz
+# OOBTKUBE and ZAP use same directory and application.shortName
 config:
   googleCloudStorage:
     keyFile: "rapidast-sa-operators-ztwim_key.json"
