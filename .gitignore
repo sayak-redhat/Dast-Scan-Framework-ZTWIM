@@ -42,3 +42,6 @@ config/oobtkube/example-operator.yaml
 # Debug / temp files
 run_all_err.txt
 *.err
+
+# ZAP scan configs (may contain bearer tokens / API keys — never commit)
+config/zap/
