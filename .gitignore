@@ -17,31 +17,35 @@ venv/
 # RapiDAST (cloned by --download-rapidast)
 rapidast/
 
-# OOBTKUBE results (automate_dast_scan.py)
-oobtkube-op/
+# All scan results (OOBTKUBE + ZAP flat + RapiDAST trees)
+results/
 
-# ZAP results (Podman RapiDAST)
+# Pre-unification result dirs (optional local cleanup; do not commit)
+oobtkube-op/
 zap-op/
 
-# Exported CRs from cluster (Cr-Configs/<operator>/*.yaml)
-Cr-Configs/
+# Exported CRs from cluster (oobtkube-config/<operator>/*.yaml)
+oobtkube-config/
+!oobtkube-config/README.md
 
 # GCS credentials (never commit)
-rapidast-sa-*.json
+secrets/
 *_key.json
+rapidast-sa-operators-*.json
 *.pem
 .env
 .env.*
+
+# Runtime ZAP configs with injected tokens (normally in /tmp, but just in case)
+zap-runtime-*/
 
 # Kubeconfig (may contain tokens)
 *.kubeconfig
 
 # Local / example configs (user-created, may contain secrets)
-config/oobtkube/example-operator.yaml
+config/operators/example/oobtkube.yaml
 
 # Debug / temp files
 run_all_err.txt
 *.err
 
-# ZAP scan configs (may contain bearer tokens / API keys — never commit)
-config/zap/

@@ -1,0 +1,19 @@
+# Trivy k8s orchestration (scripts/automate_trivy_scan.py)
+# RapiDAST output: results/trivy/rapidast/<application.shortName>/
+# Flat SARIF: results/trivy/flat/<operator>/<timestamp>/
+
+operator: ztwim
+
+trivy:
+  config: config/operators/ztwim/trivy/trivy-k8s.yaml
+  rapidastImage: "quay.io/redhatproductsecurity/rapidast:latest"
+  timeoutMinutes: 45
+
+application:
+  shortName: "ZTWIM-DAST"
+
+config:
+  googleCloudStorage:
+    keyFile: "secrets/rapidast-sa-operators-ztwim_key.json"
+    bucketName: "secaut-bucket"
+    directory: "operators/ztwim"

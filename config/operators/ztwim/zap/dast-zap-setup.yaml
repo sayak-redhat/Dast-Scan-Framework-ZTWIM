@@ -1,0 +1,43 @@
+# Namespace + ServiceAccount + RBAC for ZAP (`oc create token dast-zap -n ztwim-dast`).
+#
+# automate_zap_scan.py applies this automatically (`oc apply -f`) before creating the token.
+# Skip with: python3 scripts/automate_zap_scan.py ... --skip-bootstrap
+# Or set zap.bootstrap: false in zap.yaml.
+#
+# Manual apply (cluster-admin or equivalent):
+#   oc apply -f config/operators/ztwim/zap/dast-zap-setup.yaml
+#
+# Then verify:
+#   oc create token dast-zap -n ztwim-dast --duration=24h
+#
+# automate_zap_scan.py will still inject API URL + Bearer into zap-operator.yaml / zap-operands.yaml
+# from oc cluster-info + oc create token — you do not paste the token into those files by hand.
+#
+# cluster-reader is broad read-only; replace with a tighter ClusterRole if your policy requires it
+# (see docs/ZAP-RBAC-and-Review-Notes.md).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ztwim-dast
+  labels:
+    app.kubernetes.io/name: dast-zap
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dast-zap
+  namespace: ztwim-dast
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ztwim-dast-dast-zap-cluster-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-reader
+subjects:
+  - kind: ServiceAccount
+    name: dast-zap
+    namespace: ztwim-dast

@@ -90,8 +90,8 @@ class GoogleCloudStorage:
         Each directory is added with its path relative to base_dir preserved.
 
         Args:
-            result_dirs: list of paths to directories (e.g. oobtkube-op/ztwim/ts,
-                         zap-op/ZTWIM-Operator-ZAP/DAST-xxx, zap-op/ZTWIM-Operands-ZAP/DAST-xxx)
+            result_dirs: list of paths to directories (e.g. results/oobtkube/ztwim/ts,
+                         results/zap/rapidast/ZTWIM-Operator-ZAP/DAST-xxx, ...)
             base_dir: base path for computing relative arcnames (typically repo root)
         """
         base_dir = os.path.abspath(str(base_dir))

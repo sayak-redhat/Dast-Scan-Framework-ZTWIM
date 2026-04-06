@@ -1,0 +1,28 @@
+# ZAP scan orchestration (scripts/automate_zap_scan.py)
+# Flat results: results/zap/flat/<operator>/<timestamp>/
+# RapiDAST output: results/zap/rapidast/<shortName>/
+
+operator: ztwim
+
+zap:
+  # Used for oc create token. automate_zap_scan.py runs `oc apply -f dast-zap-setup.yaml` first (unless --skip-bootstrap).
+  # Set bootstrap: false to disable that step. Override: export ZAP_SERVICE_ACCOUNT=... ZAP_TOKEN_NAMESPACE=...
+  serviceAccount: dast-zap
+  tokenNamespace: ztwim-dast
+  configs:
+    - config/operators/ztwim/zap/zap-operator.yaml
+    - config/operators/ztwim/zap/zap-operands.yaml
+  rapidastImage: "quay.io/redhatproductsecurity/rapidast:latest"
+  timeoutMinutes: 90
+  outputNames:
+    - zap-operator-results.sarif
+    - zap-operands-results.sarif
+
+application:
+  shortName: "ZTWIM-DAST"
+
+config:
+  googleCloudStorage:
+    keyFile: "secrets/rapidast-sa-operators-ztwim_key.json"
+    bucketName: "secaut-bucket"
+    directory: "operators/ztwim"

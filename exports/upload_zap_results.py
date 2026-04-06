@@ -2,13 +2,12 @@
 """
 Upload ZAP scan results (operator and operands) to a GCP bucket.
 
-Results are stored in zap-op/<operator>/<timestamp>/ (like oobtkube-op) with flat
-SARIF files (zap-operator-results.sarif, zap-operands-results.sarif). This script
-finds the latest timestamp directory and uploads it as a gzipped tarball.
+Results are stored in results/zap/flat/<operator>/<timestamp>/ with flat SARIF files.
+This script finds the latest timestamp directory and uploads it as a gzipped tarball.
 
 Usage:
-  python3 exports/upload_zap_results.py --config config/zap/ztwim.yaml
-  python3 exports/upload_zap_results.py --config config/zap/ztwim.yaml --all
+  python3 exports/upload_zap_results.py --config config/operators/ztwim/zap/zap.yaml
+  python3 exports/upload_zap_results.py --config config/operators/ztwim/zap/zap.yaml --all
 """
 
 import argparse
@@ -22,8 +21,8 @@ except ImportError:
     print("Error: PyYAML required. Install with: pip install -r requirements.txt")
     sys.exit(1)
 
-DEFAULT_CONFIG = "config/zap/ztwim.yaml"
-RESULTS_BASE = "zap-op"
+DEFAULT_CONFIG = "config/operators/ztwim/zap/zap.yaml"
+RESULTS_BASE = "results/zap/flat"
 
 
 def load_config(config_path):
@@ -41,7 +40,7 @@ def load_config(config_path):
 
 def find_latest_zap_result_dir(script_dir, operator_name):
     """
-    Find the latest zap-op/<operator>/<timestamp>/ directory.
+    Find the latest results/zap/flat/<operator>/<timestamp>/ directory.
     Returns Path to the timestamp dir, or None if not found.
     """
     results_base = script_dir / RESULTS_BASE / operator_name
@@ -58,7 +57,7 @@ def find_latest_zap_result_dir(script_dir, operator_name):
 
 def find_zap_result_dirs(script_dir, operator_name, latest_only=True):
     """
-    Find ZAP result directories under zap-op/<operator>/<timestamp>/.
+    Find ZAP result directories under results/zap/flat/<operator>/<timestamp>/.
     Returns list of (result_dir_path,) tuples for upload.
     """
     if latest_only:

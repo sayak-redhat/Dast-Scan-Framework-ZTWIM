@@ -1,0 +1,37 @@
+# Usage: python3 scripts/automate_oobtkube_scan.py --config config/operators/ztwim/oobtkube.yaml
+
+# Framework settings (paths, tooling)
+framework:
+  rapidastRepo: "https://github.com/RedHatProductSecurity/rapidast.git"
+  rapidastDir: "rapidast"
+  # Exported CR YAMLs: oobtkube-config/<operator>/*-cr-oobtkube.yaml (see oobtkube-config/README.md)
+  configDir: "oobtkube-config"
+  resultBaseDir: "results/oobtkube"
+  oobtkubeScript: "scanners/generic/tools/oobtkube.py"
+  # RapiDAST oobtkube.py: debug | info | warning | error (default: debug for verbose run logs)
+  oobtkubeLogLevel: debug
+
+# Operator settings (required per scan)
+operator: ztwim
+namespace: zero-trust-workload-identity-manager
+cr_configs:
+  - plural: zerotrustworkloadidentitymanagers
+    name: cluster
+  # spireservers omitted: RapiDAST OOBTKUBE can overwrite spec.datastore.connectionString and break
+  # spire-server (CrashLoopBackOff). Restore with: oc apply -f oobtkube-config/ztwim/spireservers-cr-oobtkube.yaml
+  # SPIRE APIs remain covered by ZAP (config/operators/ztwim/zap/zap-operands.yaml).
+  - plural: spireagents
+    name: cluster
+  - plural: spiffecsidrivers
+    name: cluster
+  - plural: spireoidcdiscoveryproviders
+    name: cluster
+
+application:
+  shortName: "ZTWIM-DAST"
+
+config:
+  googleCloudStorage:
+    keyFile: "secrets/rapidast-sa-operators-ztwim_key.json"
+    bucketName: "secaut-bucket"
+    directory: "operators/ztwim"

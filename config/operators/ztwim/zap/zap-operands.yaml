@@ -1,0 +1,35 @@
+config:
+  configVersion: 6
+application:
+  shortName: ZTWIM-Operands-ZAP
+  url: <API_SERVER>
+general:
+  authentication:
+    type: http_header
+    parameters:
+      name: Authorization
+      value: Bearer <INJECTED_AT_RUNTIME>
+  container:
+    type: none
+scanners:
+  zap:
+    apiScan:
+      target: <API_SERVER>
+      apis:
+        apiUrl: <API_SERVER>/openapi/v3/apis/spire.spiffe.io/v1alpha1
+    passiveScan:
+      disabledRules: 2,10015,10024,10027,10054,10096,10109,10112
+    activeScan:
+      policy: Kubernetes-API-scan
+    report:
+      format:
+      - json
+      - html
+      - sarif
+      - xml
+    miscOptions:
+      enableUI: false
+      updateAddons: true
+      additionalAddons: ascanrulesBeta
+      memMaxHeap: 6144m
+      zapPort: 8080

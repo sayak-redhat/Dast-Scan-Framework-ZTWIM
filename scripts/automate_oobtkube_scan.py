@@ -12,8 +12,8 @@ Prerequisites:
   - Python 3.x with PyYAML
 
 Usage:
-  python3 scripts/automate_dast_scan.py --config config/oobtkube/ztwim.yaml
-  python3 scripts/automate_dast_scan.py --config config/oobtkube/ztwim.yaml --callback-ip 10.0.0.1
+  python3 scripts/automate_oobtkube_scan.py --config config/operators/ztwim/oobtkube.yaml
+  python3 scripts/automate_oobtkube_scan.py --config config/operators/ztwim/oobtkube.yaml --callback-ip 10.0.0.1
 """
 
 import sys
@@ -30,7 +30,7 @@ import subprocess
 
 from dast.config import load_config, get_gcs_config, get_app_name
 from dast.utils import get_script_dir, get_timestamp_dir, require_pyyaml
-from dast.oc import check_oc_prerequisites, get_api_url_and_token
+from dast.oc import check_oc_prerequisites
 from dast.oobtkube import (
     get_framework,
     get_cr_configs,
@@ -43,7 +43,7 @@ from dast.oobtkube import (
     print_summary,
 )
 
-DEFAULT_CONFIG = "config/oobtkube/ztwim.yaml"
+DEFAULT_CONFIG = "config/operators/ztwim/oobtkube.yaml"
 
 
 def main():
@@ -88,12 +88,18 @@ def main():
     parser.add_argument(
         "--skip-export",
         action="store_true",
-        help="Skip CR export; use existing files in Cr-Configs/",
+        help="Skip CR export; use existing files in oobtkube-config/",
     )
     parser.add_argument(
         "--skip-upload",
         action="store_true",
         help="Skip GCS upload (used when run from run_all_dast_scans.py)",
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=("debug", "info", "warning", "error"),
+        default=None,
+        help="RapiDAST oobtkube.py --log-level. Overrides framework.oobtkubeLogLevel (default in config: debug).",
     )
 
     args = parser.parse_args()
@@ -116,7 +122,7 @@ def main():
         print("Error: namespace is required. Set it in config file or use --namespace.")
         sys.exit(1)
     if not cr_configs and not args.skip_export:
-        print("Error: cr_configs is required in config file (or use --skip-export with existing Cr-Configs/).")
+        print("Error: cr_configs is required in config file (or use --skip-export with existing oobtkube-config/).")
         sys.exit(1)
 
     print("=" * 60)
@@ -154,9 +160,16 @@ def main():
         print(f"Skipping CR export (--skip-export). Using existing {config_dir}/")
         config_dir.mkdir(parents=True, exist_ok=True)
 
+    oobtkube_ll = args.log_level or framework.get("oobtkubeLogLevel", "debug")
     run_oobtkube_scans(
-        callback_ip, args.duration, args.port,
-        config_dir, result_dir, rapidast_path, framework["oobtkubeScript"]
+        callback_ip,
+        args.duration,
+        args.port,
+        config_dir,
+        result_dir,
+        rapidast_path,
+        framework["oobtkubeScript"],
+        oobtkube_log_level=oobtkube_ll,
     )
     print_summary(result_dir)
 

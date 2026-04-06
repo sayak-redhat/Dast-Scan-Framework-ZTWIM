@@ -19,9 +19,11 @@ def get_framework(config):
     return {
         "rapidastRepo": fw.get("rapidastRepo", "https://github.com/RedHatProductSecurity/rapidast.git"),
         "rapidastDir": fw.get("rapidastDir", "rapidast"),
-        "configDir": fw.get("configDir", "Cr-Configs"),
-        "resultBaseDir": fw.get("resultBaseDir", "oobtkube-op"),
+        "configDir": fw.get("configDir", "oobtkube-config"),
+        "resultBaseDir": fw.get("resultBaseDir", "results/oobtkube"),
         "oobtkubeScript": fw.get("oobtkubeScript", "scanners/generic/tools/oobtkube.py"),
+        # RapiDAST oobtkube.py: --log-level debug|info|warning|error
+        "oobtkubeLogLevel": fw.get("oobtkubeLogLevel", "debug"),
     }
 
 
@@ -83,7 +85,7 @@ def ensure_rapidast(script_dir, framework, download=False):
 
 
 def migrate_flat_config_to_operator_dir(config_dir, cr_configs):
-    """One-time migration: move CR files from flat Cr-Configs/ to Cr-Configs/<operator>/."""
+    """One-time migration: move CR files from flat oobtkube-config/ to oobtkube-config/<operator>/."""
     config_dir = Path(config_dir)
     base_dir = config_dir.parent
     expected = {f"{plural}-cr-oobtkube.yaml" for plural, _ in cr_configs} if cr_configs else set()
@@ -103,7 +105,7 @@ def migrate_flat_config_to_operator_dir(config_dir, cr_configs):
 
 
 def restore_crs(namespace, config_dir):
-    """Restore CRs to clean state from Cr-Configs (from previous run)."""
+    """Restore CRs to clean state from oobtkube-config (from previous run)."""
     config_dir = Path(config_dir)
     if not config_dir.exists():
         return
@@ -202,11 +204,31 @@ def get_callback_ip():
     return None
 
 
-def run_oobtkube_scans(callback_ip, duration, port, config_dir, result_dir, rapidast_path, oobtkube_script):
-    """Run OOBTKUBE for each CR config."""
+OOBTKUBE_LOG_LEVELS = ("debug", "info", "warning", "error")
+
+
+def run_oobtkube_scans(
+    callback_ip,
+    duration,
+    port,
+    config_dir,
+    result_dir,
+    rapidast_path,
+    oobtkube_script,
+    oobtkube_log_level="debug",
+):
+    """
+    Run OOBTKUBE for each CR config.
+    Persists stdout/stderr per scan to oobtkube-<stem>-run.log in result_dir (for GCS/review).
+    RapiDAST oobtkube.py supports --log-level (see OOBTKUBE_LOG_LEVELS).
+    """
     print("=" * 60)
     print("Step 3: Running OOBTKUBE scans...")
     print("=" * 60)
+
+    ll = (oobtkube_log_level or "debug").lower()
+    if ll not in OOBTKUBE_LOG_LEVELS:
+        ll = "debug"
 
     oobtkube_path = rapidast_path / oobtkube_script
     config_files = sorted(config_dir.glob("*-cr-oobtkube.yaml"))
@@ -218,6 +240,7 @@ def run_oobtkube_scans(callback_ip, duration, port, config_dir, result_dir, rapi
     for config_file in sorted(config_files):
         base = config_file.stem
         output_file = result_dir / f"oobtkube-{base}-results.sarif"
+        run_log = result_dir / f"oobtkube-{base}-run.log"
 
         print(f"  Scanning: {config_file.name} -> {output_file.name}")
 
@@ -229,6 +252,8 @@ def run_oobtkube_scans(callback_ip, duration, port, config_dir, result_dir, rapi
             "-i", callback_ip,
             "-f", str(config_file),
             "-o", str(output_file),
+            "--log-level",
+            ll,
         ]
 
         try:
@@ -239,14 +264,35 @@ def run_oobtkube_scans(callback_ip, duration, port, config_dir, result_dir, rapi
                 timeout=duration + 30,
                 cwd=str(rapidast_path),
             )
+            log_body = []
+            log_body.append(f"command: {' '.join(cmd)}")
+            log_body.append(f"returncode: {result.returncode}")
+            log_body.append("=== stdout ===")
+            log_body.append(result.stdout or "")
+            log_body.append("=== stderr ===")
+            log_body.append(result.stderr or "")
+            run_log.write_text("\n".join(log_body), encoding="utf-8")
+            print(f"    Run log: {run_log.name}")
+
+            if ll == "debug":
+                if result.stdout:
+                    print(result.stdout, end="")
+                if result.stderr:
+                    print(result.stderr, end="", file=sys.stderr)
+
             if result.returncode != 0:
-                err = (result.stderr or "")[:200]
-                print(f"    [WARN] Exit code {result.returncode}: {err}")
+                err = (result.stderr or result.stdout or "")[:500]
+                print(f"    [WARN] Exit code {result.returncode}: {err[:200]}...")
             else:
                 print(f"    [OK] Completed")
         except subprocess.TimeoutExpired:
+            run_log.write_text(
+                f"command: {' '.join(cmd)}\nTIMEOUT after {duration + 30}s\n",
+                encoding="utf-8",
+            )
             print(f"    [WARN] Timeout")
         except Exception as e:
+            run_log.write_text(f"command: {' '.join(cmd)}\nEXCEPTION: {e}\n", encoding="utf-8")
             print(f"    [FAIL] {e}")
 
     print()
@@ -267,6 +313,12 @@ def print_summary(result_dir):
     for f in sorted(result_files):
         size = f.stat().st_size
         print(f"    - {f.name} ({size} bytes)")
+
+    run_logs = sorted(result_dir.glob("oobtkube-*-run.log"))
+    if run_logs:
+        print("  Run logs (stdout/stderr from RapiDAST oobtkube):")
+        for f in run_logs:
+            print(f"    - {f.name}")
 
     print()
     print(f"  To view: cat {result_dir}/oobtkube-*-results.sarif | jq .")

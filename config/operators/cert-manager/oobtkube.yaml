@@ -1,0 +1,24 @@
+# Usage: python3 scripts/automate_oobtkube_scan.py --config config/operators/cert-manager/oobtkube.yaml
+
+framework:
+  rapidastRepo: "https://github.com/RedHatProductSecurity/rapidast.git"
+  rapidastDir: "rapidast"
+  configDir: "oobtkube-config"
+  resultBaseDir: "results/oobtkube"
+  oobtkubeScript: "scanners/generic/tools/oobtkube.py"
+  oobtkubeLogLevel: debug
+
+operator: cert-manager
+namespace: cert-manager
+cr_configs:
+  - resource: certmanagers
+    instance: cluster
+
+application:
+  shortName: "CERT-MANAGER-DAST"
+
+config:
+  googleCloudStorage:
+    keyFile: "secrets/rapidast-sa-operators-cert-manager_key.json"
+    bucketName: "secaut-bucket"
+    directory: "operators/cert-manager"
