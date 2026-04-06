@@ -1,0 +1,21 @@
+# RapiDAST generic_trivy — cluster misconfiguration (Trivy k8s)
+# See: https://github.com/RedHatProductSecurity/rapidast/blob/development/config/config-template-trivy-k8s-scan.yaml
+# Requires kubeconfig mounted at /opt/rapidast/.kube/config (see scripts/automate_trivy_scan.py)
+
+config:
+  configVersion: 6
+
+application:
+  shortName: "ZTWIM-Trivy-K8s"
+
+general:
+  container:
+    type: none
+
+scanners:
+  generic_trivy:
+    # Namespace matches ZTWIM operator install (see oobtkube.yaml namespace)
+    inline: "trivy k8s --kubeconfig=/opt/rapidast/.kube/config --include-namespaces zero-trust-workload-identity-manager --scanners=misconfig --report all --format json --skip-check-update | convert_trivy_k8s_to_sarif.py"
+    container:
+      parameters:
+        validReturns: [0]

@@ -14,7 +14,10 @@ except ImportError:
 
 from .utils import run_cmd, get_timestamp_dir
 
-RESULTS_BASE = "zap-op"
+from .config import ZAP_RAPIDAST_BASE, operator_zap_dir
+
+# Podman mount for RapiDAST (DAST-* trees live here)
+RESULTS_BASE = ZAP_RAPIDAST_BASE
 RAPIDAST_IMAGE = "quay.io/redhatproductsecurity/rapidast:latest"
 DAST_PREFIX = "DAST-"
 RAPIDAST_PREFIX = "RapiDAST-"
@@ -26,10 +29,10 @@ def get_zap_configs(config, script_dir, operator_name):
     configs = zap_section.get("configs")
     if configs:
         return [script_dir / c if not Path(c).is_absolute() else Path(c) for c in configs]
-    zap_dir = script_dir / "config" / "zap"
+    zap_dir = operator_zap_dir(script_dir, operator_name)
     defaults = [
-        zap_dir / f"{operator_name}-operator.yaml",
-        zap_dir / f"{operator_name}-operands.yaml",
+        zap_dir / "zap-operator.yaml",
+        zap_dir / "zap-operands.yaml",
     ]
     return [p for p in defaults if p.exists()]
 
@@ -42,10 +45,16 @@ def get_output_names(config, num_configs):
     return [f"zap-{t}-results.sarif" for t in ("operator", "operands")][:num_configs]
 
 
-def update_zap_config(config_path, api_server, token):
-    """Update ZAP config YAML with API URL and token."""
-    config_path = Path(config_path)
-    with open(config_path) as f:
+def _render_runtime_config(template_path, runtime_path, api_server, token):
+    """Read a ZAP template YAML, substitute API URL + token, write to runtime_path.
+
+    The on-disk template is never modified.  Placeholders recognised:
+      - <API_SERVER>  (in application.url, apiScan.target, apis.apiUrl host)
+      - <INJECTED_AT_RUNTIME>  (in general.authentication.parameters.value)
+    """
+    template_path = Path(template_path)
+    runtime_path = Path(runtime_path)
+    with open(template_path) as f:
         data = yaml.safe_load(f) or {}
 
     if "application" not in data:
@@ -74,6 +83,7 @@ def update_zap_config(config_path, api_server, token):
     if "apis" not in data["scanners"]["zap"]["apiScan"]:
         data["scanners"]["zap"]["apiScan"]["apis"] = {}
     data["scanners"]["zap"]["apiScan"]["apis"]["apiUrl"] = new_api_url
+    data["scanners"]["zap"]["apiScan"]["target"] = api_server.rstrip("/")
 
     if "general" not in data:
         data["general"] = {}
@@ -84,24 +94,39 @@ def update_zap_config(config_path, api_server, token):
     data["general"]["authentication"]["parameters"]["name"] = "Authorization"
     data["general"]["authentication"]["parameters"]["value"] = f"Bearer {token}"
 
-    with open(config_path, "w") as f:
+    with open(runtime_path, "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
 
-def update_zap_configs(config_paths, api_server, token):
-    """Update all ZAP config files with API URL and token."""
+def prepare_runtime_configs(template_paths, api_server, token, runtime_dir):
+    """Render all ZAP templates into *runtime_dir* with real API URL + token.
+
+    Returns a list of runtime config Paths (one per template).  The original
+    template files on disk are never modified — tokens only exist in the
+    temporary runtime copies which the caller deletes after the scan.
+    """
     print("=" * 60)
-    print("Step 2: Updating ZAP configs with API URL and token...")
+    print("Step 2: Preparing runtime ZAP configs (token injected in-memory)...")
     print("=" * 60)
 
-    for p in config_paths:
+    runtime_dir = Path(runtime_dir)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    runtime_paths = []
+
+    for p in template_paths:
+        p = Path(p)
+        runtime_path = runtime_dir / p.name
         try:
-            update_zap_config(p, api_server, token)
-            print(f"  [OK] Updated {p.name}")
+            _render_runtime_config(p, runtime_path, api_server, token)
+            runtime_paths.append(runtime_path)
+            print(f"  [OK] {p.name} -> {runtime_path}")
         except Exception as e:
             print(f"  [FAIL] {p.name}: {e}")
             sys.exit(1)
+
+    print(f"  Templates untouched; runtime configs in {runtime_dir}")
     print()
+    return runtime_paths
 
 
 def get_latest_rapidast_dir(parent_dir):
@@ -129,7 +154,16 @@ def get_rapidast_parent_dir(results_base, config_path):
     return None
 
 
-def run_zap_scans(config_paths, results_base, timestamp_dir, output_names, runtime, image, timeout_minutes=90):
+def run_zap_scans(
+    config_paths,
+    results_base,
+    timestamp_dir,
+    output_names,
+    runtime,
+    image,
+    timeout_minutes=90,
+    script_dir=None,
+):
     """
     Run RapiDAST for each ZAP config. After each scan, copy rapidast-scan-results.sarif
     into timestamp_dir/ with the appropriate output name.
@@ -142,6 +176,7 @@ def run_zap_scans(config_paths, results_base, timestamp_dir, output_names, runti
     results_base = Path(results_base)
     timestamp_dir = Path(timestamp_dir)
     timestamp_dir.mkdir(parents=True, exist_ok=True)
+    results_base.mkdir(parents=True, exist_ok=True)
     timeout_sec = int(timeout_minutes) * 60
 
     try:
@@ -175,6 +210,10 @@ def run_zap_scans(config_paths, results_base, timestamp_dir, output_names, runti
             )
             if result.returncode != 0:
                 print(f"    [WARN] Exit code {result.returncode}")
+                print(
+                    "    [WARN] ZAP did not complete the plan (openapi import or scan failed). "
+                    "HTML/JSON reports are only written after the plan succeeds — see RapiDAST output above."
+                )
             else:
                 print(f"    [OK] Completed")
         except subprocess.TimeoutExpired:
@@ -190,9 +229,42 @@ def run_zap_scans(config_paths, results_base, timestamp_dir, output_names, runti
                 if sarif_src.exists():
                     dest = timestamp_dir / output_name
                     shutil.copy2(sarif_src, dest)
-                    print(f"    [OK] Copied to {dest.relative_to(results_base)}")
+                    _rel = (
+                        dest.relative_to(script_dir)
+                        if script_dir is not None
+                        else dest.relative_to(timestamp_dir)
+                    )
+                    print(f"    [OK] Copied to {_rel}")
                 else:
                     print(f"    [WARN] SARIF not found in {latest}")
+
+                # RapiDAST writes HTML/JSON under <DAST-dir>/zap/; flat dir only had SARIF before.
+                zap_reports = latest / "zap"
+                if zap_reports.is_dir():
+                    # e.g. zap-operator-results.sarif -> zap-operator-report.html
+                    if output_name.endswith("-results.sarif"):
+                        report_stem = output_name[: -len("-results.sarif")]
+                        if report_stem.endswith("-results"):
+                            report_stem = report_stem[: -len("-results")]
+                    else:
+                        report_stem = Path(output_name).stem
+                    for fname, tail in (
+                        ("zap-report.html", f"{report_stem}-report.html"),
+                        ("zap-report.json", f"{report_stem}-report.json"),
+                        ("zap-report.sarif.json", f"{report_stem}-report.sarif.json"),
+                    ):
+                        src = zap_reports / fname
+                        if src.exists():
+                            dst = timestamp_dir / tail
+                            shutil.copy2(src, dst)
+                            _rel = (
+                                dst.relative_to(script_dir)
+                                if script_dir is not None
+                                else dst.relative_to(timestamp_dir)
+                            )
+                            print(f"    [OK] Copied {fname} -> {_rel}")
+                elif sarif_src.exists():
+                    print(f"    [WARN] No zap/ dir in {latest} (HTML reports live there when scan completes)")
             else:
                 print(f"    [WARN] No result dir in {parent_dir}")
         else:
@@ -207,15 +279,20 @@ def print_summary(result_dir):
     print("Step 4: Summary")
     print("=" * 60)
 
-    result_files = list(Path(result_dir).glob("*.sarif"))
-    if not result_files:
+    result_dir = Path(result_dir)
+    result_files = sorted(result_dir.glob("*.sarif"))
+    html_files = sorted(result_dir.glob("*-report.html"))
+    if not result_files and not html_files:
         print("  No result files found.")
         return
 
     print(f"  Results stored in: {result_dir}")
-    for f in sorted(result_files):
+    for f in result_files:
         size = f.stat().st_size
         print(f"    - {f.name} ({size} bytes)")
+    for f in html_files:
+        size = f.stat().st_size
+        print(f"    - {f.name} ({size} bytes) [HTML triage]")
 
     print()
     print(f"  To view: cat {result_dir}/zap-*-results.sarif | jq .")

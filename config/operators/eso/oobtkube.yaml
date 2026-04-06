@@ -1,15 +1,14 @@
 # DAST Scan Automation - External Secrets Operator Configuration
-# Usage: python3 scripts/automate_dast_scan.py --config config/oobtkube/eso.yaml
+# Usage: python3 scripts/automate_oobtkube_scan.py --config config/operators/eso/oobtkube.yaml
 
-# Framework settings (paths, tooling)
 framework:
   rapidastRepo: "https://github.com/RedHatProductSecurity/rapidast.git"
   rapidastDir: "rapidast"
-  configDir: "Cr-Configs"
-  resultBaseDir: "oobtkube-op"
+  configDir: "oobtkube-config"
+  resultBaseDir: "results/oobtkube"
   oobtkubeScript: "scanners/generic/tools/oobtkube.py"
+  oobtkubeLogLevel: debug
 
-# Operator settings (required per scan)
 operator: eso
 namespace: external-secrets
 cr_configs:
@@ -20,15 +19,11 @@ cr_configs:
   - plural: secretstores
     name: secretstore
 
-# Application metadata (for GCS export, etc.)
 application:
   shortName: "ESO-DAST"
 
-# GCS export (optional)
-# When config.googleCloudStorage.bucketName is set, scan results are uploaded:
-#   gs://{bucket}/{directory}/{timestamp}-RapiDAST-{app_name}-{random}.tgz
 config:
   googleCloudStorage:
-    keyFile: "rapidast-sa-operators-eso_key.json"
+    keyFile: "secrets/rapidast-sa-operators-eso_key.json"
     bucketName: "secaut-bucket"
     directory: "operators/eso"
